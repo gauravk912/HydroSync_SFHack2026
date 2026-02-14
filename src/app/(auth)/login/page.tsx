@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthShell } from "@/components/auth-shell";
+// import { loginMock } from "@/lib/mock-auth";
 
 const schema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -28,36 +29,55 @@ export default function LoginPage() {
     defaultValues: { username: "", password: "" },
   });
 
-  async function onSubmit(values: FormData) {
+  // function onSubmit(data: FormData) {
+  //   setServerError(null);
+
+  //   const res = loginMock(data.username, data.password);
+
+  //   if (!res.ok) {
+  //     setServerError(res.error ?? "Login failed.");
+  //     return;
+  //   }
+
+  //   router.push("/dashboard");
+  // }
+
+  async function onSubmit(data: FormData) {
   setServerError(null);
 
-  const res = await fetch("/api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      username: values.username,
-      password: values.password,
-    }),
-  });
-
-  // safer than res.json() if server returns HTML errors
-  const text = await res.text();
-  let data: any = {};
   try {
-    data = JSON.parse(text);
-  } catch {
-    // leave as {}
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: data.username.trim(),
+        password: data.password,
+      }),
+    });
+
+    const text = await res.text();
+    let json: any = {};
+    try {
+      json = JSON.parse(text);
+    } catch {}
+
+    if (!res.ok) {
+      setServerError(json?.error ?? "Login failed.");
+      return;
+    }
+
+    // ✅ store user object (recommended)
+    localStorage.setItem("hydrosync_user", JSON.stringify(json.user));
+
+    // (optional) if you also want individual keys:
+    // localStorage.setItem("hydrosync_userId", json.user?.id);
+    // localStorage.setItem("hydrosync_role", json.user?.role);
+    // localStorage.setItem("hydrosync_username", json.user?.username);
+
+    router.push("/dashboard");
+  } catch (e: any) {
+    setServerError(e?.message || "Network error");
   }
-
-  if (!res.ok) {
-    setServerError(data?.error ?? "Login failed.");
-    return;
-  }
-
-  // ✅ store user for hackathon-simple session
-  localStorage.setItem("hydrosync_user", JSON.stringify(data.user));
-
-  router.push("/dashboard");
 }
 
   return (
