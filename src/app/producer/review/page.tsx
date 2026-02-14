@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 type ExtractedWaterPassport = {
   reportName: string;
   extractedAt: string;
-  confidence: number; // 0-1
+  confidence: number;
 
   facility: {
     name?: string;
