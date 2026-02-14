@@ -5,17 +5,26 @@ import bcrypt from "bcryptjs";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { role, username, password, industryName, city, state, address } = body;
 
-    if (!role || !username || !password) {
+    const {
+      role,
+      username,
+      password,
+      orgName,
+      city,
+      state,
+      address,
+      consumerType,
+    } = body;
+
+    if (!role || !username || !password || !orgName || !city || !state || !address) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
     const client = await clientPromise;
     const db = client.db("hydrosync");
 
-    // Check if username already exists
-    const existingUser = await db.collection("users").findOne({ username });
+    const existingUser = await db.collection("users").findOne({ username: username.trim() });
     if (existingUser) {
       return NextResponse.json({ error: "Username already exists" }, { status: 409 });
     }
@@ -23,13 +32,17 @@ export async function POST(req: Request) {
     const passwordHash = await bcrypt.hash(password, 10);
 
     const result = await db.collection("users").insertOne({
-      role, // "producer" or "consumer"
-      username,
+      role,
+      username: username.trim(),
       passwordHash,
-      industryName,
-      city,
-      state,
-      address,
+
+      orgName: orgName.trim(),
+      city: city.trim(),
+      state: state.trim(),
+      address: address.trim(),
+
+      consumerType: role === "consumer" ? (consumerType?.trim() || "") : "",
+
       createdAt: new Date(),
     });
 
@@ -39,6 +52,7 @@ export async function POST(req: Request) {
     });
 
   } catch (err: any) {
+    console.error("Signup error:", err);
     return NextResponse.json(
       { error: err?.message || "Server error" },
       { status: 500 }
