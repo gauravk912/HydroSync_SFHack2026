@@ -132,8 +132,7 @@ export default function SignupPage() {
         }
 
         // Optional: store userId locally for hackathon flows
-        localStorage.setItem("hydrosync_userId", data.userId);
-        localStorage.setItem("hydrosync_role", values.role);
+        localStorage.setItem("hydrosync_user", JSON.stringify(data.user));
 
         router.push("/dashboard");
       } catch (e: any) {

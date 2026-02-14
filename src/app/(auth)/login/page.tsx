@@ -66,15 +66,34 @@ export default function LoginPage() {
       return;
     }
 
-    // ✅ store user object (recommended)
-    localStorage.setItem("hydrosync_user", JSON.stringify(json.user));
+    // Build a user object no matter what the API returns
+    const user =
+      json?.user ??
+      {
+        id: json?.userId,
+        role: json?.role,
+        username: json?.username,
+        orgName: json?.orgName ?? json?.industryName ?? null,
+        city: json?.city ?? null,
+        state: json?.state ?? null,
+        address: json?.address ?? null,
+        consumerType: json?.consumerType ?? null,
+      };
+    
+    console.log("LOGIN RESPONSE:", json);
 
-    // (optional) if you also want individual keys:
-    // localStorage.setItem("hydrosync_userId", json.user?.id);
-    // localStorage.setItem("hydrosync_role", json.user?.role);
-    // localStorage.setItem("hydrosync_username", json.user?.username);
+
+    // If still missing essentials, treat as failure
+    if (!user?.id || !user?.role || !user?.username) {
+      setServerError("Login response missing user data. Check /api/auth/login.");
+      return;
+    }
+
+    localStorage.setItem("hydrosync_user", JSON.stringify(user));
+    console.log("Saved hydrosync_user:", localStorage.getItem("hydrosync_user"));
 
     router.push("/dashboard");
+
   } catch (e: any) {
     setServerError(e?.message || "Network error");
   }
@@ -91,8 +110,10 @@ export default function LoginPage() {
           <Input
             id="username"
             placeholder="figo123"
+            autoComplete="username"
             {...form.register("username")}
           />
+
           {form.formState.errors.username && (
             <p className="text-sm text-destructive">
               {form.formState.errors.username.message}
@@ -106,8 +127,10 @@ export default function LoginPage() {
             id="password"
             type="password"
             placeholder="••••••••"
+            autoComplete="current-password"
             {...form.register("password")}
           />
+
           {form.formState.errors.password && (
             <p className="text-sm text-destructive">
               {form.formState.errors.password.message}
