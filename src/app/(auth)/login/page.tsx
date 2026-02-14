@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthShell } from "@/components/auth-shell";
-import { loginMock } from "@/lib/mock-auth";
+// import { loginMock } from "@/lib/mock-auth";
 
 const schema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -29,17 +29,48 @@ export default function LoginPage() {
     defaultValues: { username: "", password: "" },
   });
 
-  function onSubmit(data: FormData) {
+  // function onSubmit(data: FormData) {
+  //   setServerError(null);
+
+  //   const res = loginMock(data.username, data.password);
+
+  //   if (!res.ok) {
+  //     setServerError(res.error ?? "Login failed.");
+  //     return;
+  //   }
+
+  //   router.push("/dashboard");
+  // }
+
+  async function onSubmit(data: FormData) {
     setServerError(null);
 
-    const res = loginMock(data.username, data.password);
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: data.username.trim(),
+          password: data.password,
+        }),
+      });
 
-    if (!res.ok) {
-      setServerError(res.error ?? "Login failed.");
-      return;
+      const json = await res.json();
+
+      if (!res.ok) {
+        setServerError(json?.error || "Login failed.");
+        return;
+      }
+
+      // Hackathon-simple session store
+      localStorage.setItem("hydrosync_userId", json.userId);
+      localStorage.setItem("hydrosync_role", json.role);
+      localStorage.setItem("hydrosync_username", json.username);
+
+      router.push("/dashboard");
+    } catch (e: any) {
+      setServerError(e?.message || "Network error");
     }
-
-    router.push("/dashboard");
   }
 
   return (
