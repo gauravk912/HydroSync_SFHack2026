@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
-import { signupMock, type MockUser } from "@/lib/mock-auth";
+// import { signupMock, type MockUser } from "@/lib/mock-auth";
 
 const US_STATES = [
   "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
@@ -81,27 +81,65 @@ export default function SignupPage() {
   const role = form.watch("role");
   const isConsumer = useMemo(() => role === "consumer", [role]);
 
-  function onSubmit(values: FormData) {
-    setServerError(null);
+  // function onSubmit(values: FormData) {
+  //   setServerError(null);
 
-    const payload: MockUser = {
-      role: values.role,
-      username: values.username.trim(),
-      password: values.password,
+  //   const payload: MockUser = {
+  //     role: values.role,
+  //     username: values.username.trim(),
+  //     password: values.password,
 
-      orgName: values.orgName.trim(),
-      city: values.city.trim(),
-      state: values.state.trim(),
-      address: values.address.trim(),
+  //     orgName: values.orgName.trim(),
+  //     city: values.city.trim(),
+  //     state: values.state.trim(),
+  //     address: values.address.trim(),
 
-      ...(values.role === "consumer"
-        ? { consumerType: values.consumerType?.trim() }
-        : {}),
-    };
+  //     ...(values.role === "consumer"
+  //       ? { consumerType: values.consumerType?.trim() }
+  //       : {}),
+  //   };
 
-    signupMock(payload);
-    router.push("/dashboard");
-  }
+  //   signupMock(payload);
+  //   router.push("/dashboard");
+  // }
+
+  async function onSubmit(values: FormData) {
+      setServerError(null);
+
+      try {
+        const res = await fetch("/api/auth/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            role: values.role,
+            username: values.username.trim(),
+            password: values.password,
+
+            orgName: values.orgName.trim(),
+            city: values.city.trim(),
+            state: values.state.trim(),
+            address: values.address.trim(),
+
+            consumerType: values.role === "consumer" ? values.consumerType?.trim() : "",
+          }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          setServerError(data?.error || "Signup failed");
+          return;
+        }
+
+        // Optional: store userId locally for hackathon flows
+        localStorage.setItem("hydrosync_userId", data.userId);
+        localStorage.setItem("hydrosync_role", values.role);
+
+        router.push("/dashboard");
+      } catch (e: any) {
+        setServerError(e?.message || "Network error");
+      }
+    }
 
   return (
     <AuthShell
