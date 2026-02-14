@@ -43,35 +43,61 @@ export default function LoginPage() {
   // }
 
   async function onSubmit(data: FormData) {
-    setServerError(null);
+  setServerError(null);
 
+  try {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: data.username.trim(),
+        password: data.password,
+      }),
+    });
+
+    const text = await res.text();
+    let json: any = {};
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: data.username.trim(),
-          password: data.password,
-        }),
-      });
+      json = JSON.parse(text);
+    } catch {}
 
-      const json = await res.json();
-
-      if (!res.ok) {
-        setServerError(json?.error || "Login failed.");
-        return;
-      }
-
-      // Hackathon-simple session store
-      localStorage.setItem("hydrosync_userId", json.userId);
-      localStorage.setItem("hydrosync_role", json.role);
-      localStorage.setItem("hydrosync_username", json.username);
-
-      router.push("/dashboard");
-    } catch (e: any) {
-      setServerError(e?.message || "Network error");
+    if (!res.ok) {
+      setServerError(json?.error ?? "Login failed.");
+      return;
     }
+
+    // Build a user object no matter what the API returns
+    const user =
+      json?.user ??
+      {
+        id: json?.userId,
+        role: json?.role,
+        username: json?.username,
+        orgName: json?.orgName ?? json?.industryName ?? null,
+        city: json?.city ?? null,
+        state: json?.state ?? null,
+        address: json?.address ?? null,
+        consumerType: json?.consumerType ?? null,
+      };
+    
+    console.log("LOGIN RESPONSE:", json);
+
+
+    // If still missing essentials, treat as failure
+    if (!user?.id || !user?.role || !user?.username) {
+      setServerError("Login response missing user data. Check /api/auth/login.");
+      return;
+    }
+
+    localStorage.setItem("hydrosync_user", JSON.stringify(user));
+    console.log("Saved hydrosync_user:", localStorage.getItem("hydrosync_user"));
+
+    router.push("/dashboard");
+
+  } catch (e: any) {
+    setServerError(e?.message || "Network error");
   }
+}
 
   return (
     <AuthShell
@@ -84,8 +110,10 @@ export default function LoginPage() {
           <Input
             id="username"
             placeholder="figo123"
+            autoComplete="username"
             {...form.register("username")}
           />
+
           {form.formState.errors.username && (
             <p className="text-sm text-destructive">
               {form.formState.errors.username.message}
@@ -99,8 +127,10 @@ export default function LoginPage() {
             id="password"
             type="password"
             placeholder="••••••••"
+            autoComplete="current-password"
             {...form.register("password")}
           />
+
           {form.formState.errors.password && (
             <p className="text-sm text-destructive">
               {form.formState.errors.password.message}

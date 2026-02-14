@@ -31,7 +31,7 @@ export async function POST(req: Request) {
 
     const passwordHash = await bcrypt.hash(password, 10);
 
-    const result = await db.collection("users").insertOne({
+    const doc = {
       role,
       username: username.trim(),
       passwordHash,
@@ -42,15 +42,25 @@ export async function POST(req: Request) {
       address: address.trim(),
 
       consumerType: role === "consumer" ? (consumerType?.trim() || "") : "",
-
       createdAt: new Date(),
-    });
+    };
 
+    const result = await db.collection("users").insertOne(doc);
+
+    // ✅ return same shape as login route
     return NextResponse.json({
       success: true,
-      userId: result.insertedId.toString(),
+      user: {
+        id: result.insertedId.toString(),
+        role: doc.role,
+        username: doc.username,
+        orgName: doc.orgName,
+        city: doc.city,
+        state: doc.state,
+        address: doc.address,
+        consumerType: doc.consumerType || null,
+      },
     });
-
   } catch (err: any) {
     console.error("Signup error:", err);
     return NextResponse.json(
