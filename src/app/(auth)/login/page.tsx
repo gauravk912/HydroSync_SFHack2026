@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthShell } from "@/components/auth-shell";
-import { loginMock } from "@/lib/mock-auth";
 
 const schema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -29,18 +28,37 @@ export default function LoginPage() {
     defaultValues: { username: "", password: "" },
   });
 
-  function onSubmit(data: FormData) {
-    setServerError(null);
+  async function onSubmit(values: FormData) {
+  setServerError(null);
 
-    const res = loginMock(data.username, data.password);
+  const res = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: values.username,
+      password: values.password,
+    }),
+  });
 
-    if (!res.ok) {
-      setServerError(res.error ?? "Login failed.");
-      return;
-    }
-
-    router.push("/dashboard");
+  // safer than res.json() if server returns HTML errors
+  const text = await res.text();
+  let data: any = {};
+  try {
+    data = JSON.parse(text);
+  } catch {
+    // leave as {}
   }
+
+  if (!res.ok) {
+    setServerError(data?.error ?? "Login failed.");
+    return;
+  }
+
+  // ✅ store user for hackathon-simple session
+  localStorage.setItem("hydrosync_user", JSON.stringify(data.user));
+
+  router.push("/dashboard");
+}
 
   return (
     <AuthShell
