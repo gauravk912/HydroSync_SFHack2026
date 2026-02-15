@@ -1,20 +1,17 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import mongoose from "mongoose";
 import { z } from "zod";
+import clientPromise from "@/lib/mongodb";
 
-import { connectMongo } from "@/lib/mongo";
-import { getLabReportModel } from "@/models/LabReport";
+export const runtime = "nodejs";
 
 const ExtractSchema = z.object({
   company_name: z.string().nullable(),
   location: z.string().nullable(),
   producer_industry_type: z.string().nullable(),
   extracted_at: z.string().nullable(),
-
   volume_available_gallons: z.number().nullable(),
   treatment_method: z.string().nullable(),
-
   ph: z.number().nullable(),
   temperature_C: z.number().nullable(),
   turbidity_NTU: z.number().nullable(),
@@ -45,8 +42,8 @@ function safeJsonFromGemini(text: string) {
 export async function POST(req: Request) {
   try {
     const form = await req.formData();
-    const file = form.get("pdf");
 
+    const file = form.get("pdf");
     if (!file || !(file instanceof File)) {
       return NextResponse.json({ error: "Missing pdf file" }, { status: 400 });
     }
@@ -54,26 +51,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Only PDF supported" }, { status: 400 });
     }
 
+    const userId = form.get("userId");
+    const producerId = typeof userId === "string" ? userId : null;
+
     const arrayBuffer = await file.arrayBuffer();
     const base64 = Buffer.from(arrayBuffer).toString("base64");
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
     const model = genAI.getGenerativeModel({ model: "models/gemini-2.5-flash" });
 
-    const prompt = `
-Return ONLY valid JSON (no markdown, no backticks, no commentary).
-Extract structured water quality data from the PDF.
-If any field is missing, set it to null.
-Use EXACT keys:
-
-company_name, location, producer_industry_type, extracted_at,
-volume_available_gallons, treatment_method,
-ph, temperature_C, turbidity_NTU, color_PtCo, tds_mg_L, tss_mg_L, bod5_mg_L, cod_mg_L,
-free_chlorine_mg_L, total_coliform_CFU_100mL, hardness_mg_L_as_CaCO3, chloride_mg_L, sulfate_mg_L,
-silica_mg_L, iron_mg_L, manganese_mg_L, oil_and_grease_mg_L, electrical_conductivity_uS_cm
-
-Set extracted_at to the current ISO timestamp when extraction happens.
-`;
+    const prompt = `Return ONLY valid JSON (no markdown, no backticks, no commentary).
+Extract structured water quality data from the PDF. If any field is missing, set it to null.
+Use EXACT keys: company_name, location, producer_industry_type, extracted_at, volume_available_gallons, treatment_method, ph, temperature_C, turbidity_NTU, color_PtCo, tds_mg_L, tss_mg_L, bod5_mg_L, cod_mg_L, free_chlorine_mg_L, total_coliform_CFU_100mL, hardness_mg_L_as_CaCO3, chloride_mg_L, sulfate_mg_L, silica_mg_L, iron_mg_L, manganese_mg_L, oil_and_grease_mg_L, electrical_conductivity_uS_cm.
+Set extracted_at to the current ISO timestamp when extraction happens.`;
 
     const result = await model.generateContent([
       { inlineData: { data: base64, mimeType: "application/pdf" } },
@@ -88,20 +78,27 @@ Set extracted_at to the current ISO timestamp when extraction happens.
       extracted_at: new Date().toISOString(),
     });
 
-    await connectMongo();
-    const db = mongoose.connection.useDb("hydrosync"); // <-- your new DB name
-    const LabReport = getLabReportModel(db);
+    // ✅ Save to MongoDB Atlas using the SAME driver you use for /auth routes
+    const client = await clientPromise;
+    const db = client.db("hydrosync");
 
-    const doc = await LabReport.create({
+    const doc = {
       ...validated,
-      extracted_at: new Date(validated.extracted_at!),
+      extracted_at: validated.extracted_at ? new Date(validated.extracted_at) : new Date(),
+      producerId, // optional
       source_pdf_filename: file.name,
       source_pdf_mime: file.type,
-    });
+      source_pdf_size_bytes: file.size,
+      gemini_raw_text: text, // super useful for debugging extraction
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
 
-    return NextResponse.json({ reportId: doc._id.toString() });
+    const insert = await db.collection("labreports").insertOne(doc);
+
+    return NextResponse.json({ reportId: insert.insertedId.toString() });
   } catch (err: any) {
-    console.error(err);
+    console.error("POST /api/reports error:", err);
     return NextResponse.json({ error: err?.message ?? "Server error" }, { status: 500 });
   }
 }

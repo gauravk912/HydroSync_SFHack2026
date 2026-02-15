@@ -175,6 +175,15 @@ export default function ProducerReviewPage() {
             <MetricCard title="Color" value={fmt(data.color_PtCo)} hint="PtCo" />
           </div>
         </div>
+        <div className="mt-8 flex justify-center">
+        <Button
+          className="px-6 py-3 text-base font-medium"
+          onClick={() => router.push(`/producer/analysis/${id}`)}
+        >
+          View Water Analysis Report
+        </Button>
+        </div>
+
       </div>
     </div>
   );

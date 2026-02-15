@@ -1,27 +1,28 @@
 import { NextResponse } from "next/server";
-import mongoose from "mongoose";
-import { connectMongo } from "@/lib/mongo";
-import { getLabReportModel } from "@/models/LabReport";
+import clientPromise from "@/lib/mongodb";
+import { ObjectId } from "mongodb";
+
+export const runtime = "nodejs";
 
 export async function GET(
   _req: Request,
-  ctx: { params: Promise<{ id: string }> } // params is a Promise in Next 16
+  ctx: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await ctx.params;
 
-    await connectMongo();
-    const db = mongoose.connection.useDb("hydrosync");
-    const LabReport = getLabReportModel(db);
+    if (!ObjectId.isValid(id)) {
+      return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+    }
 
-    const doc = await LabReport.findById(id).lean();
+    const client = await clientPromise;
+    const db = client.db("hydrosync");
+
+    const doc = await db.collection("labreports").findOne({ _id: new ObjectId(id) });
+
     if (!doc) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
     return NextResponse.json(doc);
   } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message ?? "Server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: err?.message ?? "Server error" }, { status: 500 });
   }
 }
