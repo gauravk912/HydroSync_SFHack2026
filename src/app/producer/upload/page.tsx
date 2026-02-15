@@ -1,5 +1,6 @@
 "use client";
 
+{/* <div className="min-h-screen bg-gradient-to-br from-blue-50 via-cyan-50 to-emerald-50"></div> */}
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 

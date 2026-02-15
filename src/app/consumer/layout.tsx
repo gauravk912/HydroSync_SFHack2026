@@ -31,7 +31,7 @@ export default function ConsumerLayout({ children }: { children: React.ReactNode
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Top bar (single) */}
-      <div className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
+      {/* <div className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div>
             <p className="text-xs font-medium text-muted-foreground">Consumer Console</p>
@@ -61,7 +61,7 @@ export default function ConsumerLayout({ children }: { children: React.ReactNode
             </Button>
           </div>
         </div>
-      </div>
+      </div> */}
 
       {children}
     </div>
