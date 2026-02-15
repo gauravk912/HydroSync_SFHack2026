@@ -32,10 +32,38 @@ const LabReportSchema = new Schema(
     source_pdf_filename: { type: String, default: null },
     source_pdf_mime: { type: String, default: null },
     source_pdf_url: { type: String, default: null },
+
+    // ✅ NEW: model output + summary saved to Mongo
+    model_output: {
+      recommended: { type: String, default: null },
+      confidence: { type: Number, default: null }, // store 0.811, not "81.1%"
+      top5: {
+        type: [
+          {
+            industry: { type: String, required: true },
+            probability: { type: Number, required: true }, // 0..1
+          },
+        ],
+        default: [],
+      },
+      compatible_count: { type: Number, default: 0 },
+      rejected_count: { type: Number, default: 0 },
+      compatible: { type: [String], default: [] },
+      rejected: { type: [String], default: [] },
+    },
+
+    gemini_summary: { type: String, default: null },
+    analyzedAt: { type: Date, default: null },
+    analysis_version: { type: String, default: "v1" },
+
+    // Optional debugging
+    prediction_raw: { type: Schema.Types.Mixed, default: null },
   },
   { timestamps: true }
 );
 
-export function getLabReportModel(db: mongoose.Connection) {
-  return db.models.LabReport || db.model("LabReport", LabReportSchema);
+// ✅ Don’t force db param. This prevents runtime issues across routes.
+export function getLabReportModel(db?: mongoose.Connection) {
+  const conn = db ?? mongoose.connection;
+  return conn.models.LabReport || conn.model("LabReport", LabReportSchema);
 }

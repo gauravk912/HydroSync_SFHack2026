@@ -13,7 +13,7 @@ type Report = {
   producer_industry_type?: string | null;
   extracted_at?: string | Date | null;
 
-  // extracted numeric fields (your mongo format)
+  // extracted numeric fields (mongo format)
   ph?: number | null;
   temperature_C?: number | null;
   turbidity_NTU?: number | null;
@@ -32,6 +32,19 @@ type Report = {
   manganese_mg_L?: number | null;
   oil_and_grease_mg_L?: number | null;
   electrical_conductivity_uS_cm?: number | null;
+
+  // ✅ optional fields saved after analysis (if your API stores them)
+  model_output?: {
+    recommended?: string | null;
+    confidence?: number | null;
+    top5?: Array<{ industry: string; probability: number }>;
+    compatible_count?: number;
+    rejected_count?: number;
+    compatible?: string[];
+    rejected?: string[];
+  } | null;
+
+  gemini_summary?: string | null;
 };
 
 type PredictResponse = {
@@ -72,12 +85,11 @@ function fmt(v: any) {
 /**
  * ✅ CRITICAL: model expects feature names exactly like:
  * "pH", "temperature_C", "turbidity_NTU", ...
- * but your DB fields are like: ph, temperature_C, turbidity_NTU...
- * so we map ph -> pH and keep the rest as-is
+ * but DB uses "ph" so we map ph -> pH
  */
 function buildModelInputFromReport(r: Report) {
   return {
-    pH: r.ph ?? null, // IMPORTANT mapping
+    pH: r.ph ?? null,
     temperature_C: r.temperature_C ?? null,
     turbidity_NTU: r.turbidity_NTU ?? null,
     color_PtCo: r.color_PtCo ?? null,
@@ -112,7 +124,6 @@ export default function ProducerAnalysisPage() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryErr, setSummaryErr] = useState<string | null>(null);
 
-
   const modelInput = useMemo(() => (report ? buildModelInputFromReport(report) : null), [report]);
 
   useEffect(() => {
@@ -126,50 +137,57 @@ export default function ProducerAnalysisPage() {
       try {
         setLoading(true);
 
-        // 1) fetch report
+        // 1) Fetch report
         const r1 = await fetch(`/api/reports/${id}`);
         const reportJson = await r1.json();
         if (!r1.ok) throw new Error(reportJson?.error || "Failed to load report");
         setReport(reportJson);
 
-        // 2) call predict
+        // ✅ If already analyzed & saved in Mongo, just show it (no need to recompute)
+        if (reportJson?.gemini_summary) {
+          setSummaryText(reportJson.gemini_summary);
+        }
+
+        // 2) Call predict
         const sample = buildModelInputFromReport(reportJson);
         const r2 = await fetch("/api/predict", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(sample),
         });
+
         const predJson = await r2.json();
         if (!r2.ok) throw new Error(predJson?.error || "Prediction failed");
-
         setPred(predJson);
+
+        // 3) Generate summary + ✅ SAVE it in Mongo
         setSummaryLoading(true);
         setSummaryErr(null);
 
         try {
-        const res3 = await fetch("/api/analysis-summary", {
+          const res3 = await fetch("/api/analysis-summary", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-            reportMeta: {
+              reportId: id, // ✅ CRITICAL FIX (so backend can update Mongo)
+              reportMeta: {
                 company_name: reportJson.company_name ?? null,
                 location: reportJson.location ?? null,
-            },
-            sample,          // the model input you sent to /api/predict
-            prediction: predJson,
+              },
+              sample, // model input
+              prediction: predJson,
             }),
-        });
+          });
 
-        const sumJson = await res3.json();
-        if (!res3.ok) throw new Error(sumJson?.error || "Summary failed");
-        setSummaryText(sumJson.summary);
+          const sumJson = await res3.json();
+          if (!res3.ok) throw new Error(sumJson?.error || "Summary failed");
+          setSummaryText(sumJson.summary);
         } catch (e: any) {
-        setSummaryErr(e.message);
-        setSummaryText(null);
+          setSummaryErr(e?.message || "Summary failed");
+          setSummaryText(null);
         } finally {
-        setSummaryLoading(false);
+          setSummaryLoading(false);
         }
-
       } catch (e: any) {
         setErr(e?.message || "Something went wrong");
       } finally {
@@ -246,16 +264,16 @@ export default function ProducerAnalysisPage() {
         <Card title="Summary">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Metric
-                label="Recommended"
-                value={
-                    pred?.summary.recommended
-                    ? getIndustryDisplayName(pred.summary.recommended)
-                    : "—"
-                }
+              label="Recommended"
+              value={
+                pred?.summary.recommended ? getIndustryDisplayName(pred.summary.recommended) : "—"
+              }
             />
             <Metric
               label="Confidence"
-              value={pred?.summary.confidence == null ? "—" : `${(pred.summary.confidence * 100).toFixed(1)}%`}
+              value={
+                pred?.summary.confidence == null ? "—" : `${(pred.summary.confidence * 100).toFixed(1)}%`
+              }
             />
             <Metric label="Compatible industries" value={fmt(pred?.summary.countCompatible)} />
             <Metric label="Rejected industries" value={fmt(pred?.summary.countRejected)} />
@@ -277,13 +295,11 @@ export default function ProducerAnalysisPage() {
                 {(pred?.top5 || []).map((r) => (
                   <tr key={r.rank} className="border-t">
                     <td className="px-4 py-3">{r.rank}</td>
-                    <td className="px-4 py-3 font-medium">
-                        {getIndustryDisplayName(r.industry)}
-                    </td>
+                    <td className="px-4 py-3 font-medium">{getIndustryDisplayName(r.industry)}</td>
                     <td className="px-4 py-3">{(r.probability * 100).toFixed(2)}%</td>
                   </tr>
                 ))}
-                {(!pred?.top5 || pred.top5.length === 0) ? (
+                {!pred?.top5 || pred.top5.length === 0 ? (
                   <tr className="border-t">
                     <td className="px-4 py-3 text-muted-foreground" colSpan={3}>
                       No compatible industries found at the current threshold.
@@ -295,41 +311,29 @@ export default function ProducerAnalysisPage() {
           </div>
         </Card>
 
-        {/* Debug / transparency (optional but nice for judges) */}
+        {/* Gemini Summary */}
         <Card title="Model Analysis Summary">
-        <div className="rounded-xl border bg-slate-50 p-4 text-sm leading-relaxed">
+          <div className="rounded-xl border bg-slate-50 p-4 text-sm leading-relaxed">
             {summaryLoading && (
-            <span className="text-muted-foreground">
-                Generating summary with Gemini…
-            </span>
+              <span className="text-muted-foreground">Generating summary with Gemini…</span>
             )}
 
-            {!summaryLoading && summaryErr && (
-            <span className="text-red-600">
-                {summaryErr}
-            </span>
-            )}
+            {!summaryLoading && summaryErr && <span className="text-red-600">{summaryErr}</span>}
 
             {!summaryLoading && !summaryErr && summaryText && (
-            <span>
-                {summaryText
-                    ? summaryText.replace(
-                        /\b(cooling_once_through|cooling_recirculating_towers|boiler_makeup_refinery_feed|pulp_paper_chemical_unbleached|pulp_paper_bleached|chemical_manufacturing_process|petrochemical_coal_process|textiles_sizing_suspension|textiles_scouring_bleach_dye|cement_concrete_aggregate_wash)\b/g,
-                        (m) => getIndustryDisplayName(m)
-                    )
-                : ""}
-            </span>
-
+              <span>
+                {summaryText.replace(
+                  /\b(cooling_once_through|cooling_recirculating_towers|boiler_makeup_refinery_feed|pulp_paper_chemical_unbleached|pulp_paper_bleached|chemical_manufacturing_process|petrochemical_coal_process|textiles_sizing_suspension|textiles_scouring_bleach_dye|cement_concrete_aggregate_wash)\b/g,
+                  (m) => getIndustryDisplayName(m)
+                )}
+              </span>
             )}
 
             {!summaryLoading && !summaryErr && !summaryText && (
-            <span className="text-muted-foreground">
-                No summary available.
-            </span>
+              <span className="text-muted-foreground">No summary available.</span>
             )}
-        </div>
+          </div>
         </Card>
-
       </div>
     </div>
   );
