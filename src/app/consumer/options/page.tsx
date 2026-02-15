@@ -4,36 +4,76 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 
-type Selection = {
+/** ---------------- Types matching your API response ---------------- */
+
+type ApiSelection = {
   producerId: string;
-  producerName: string;
-  distanceKm: number;
+  company_name: string;
+  location: string;
   allocatedGallons: number;
   availableGallons: number;
+  distanceMiles: number;
   confidence: number;
-  predictedIndustry: string | null;
-  summary: string | null;
-  location: any | null;
+  recommended?: string | null;
+  recommendedDisplay?: string | null;
+  compatibleProb?: number | null;
+  gemini_summary?: string | null;
+  consumerNeedDisplay?: string | null;
+};
+
+type ApiOption = {
+  mode: "SINGLE" | "PAIR" | "MULTI";
+  remainingGallons: number;
+  selections: ApiSelection[];
+};
+
+type RankedProducer = {
+  producerId: string;
+  company_name: string;
+  location: string;
+  availableGallons: number;
+  distanceMiles: number;
+  confidence: number;
+  recommended?: string | null;
+  recommendedDisplay?: string | null;
+  compatibleProb?: number | null;
 };
 
 type MatchResponse = {
   success: boolean;
   demand: any;
-  selections: Selection[];
+  industryNeedDisplay?: string | null;
+
+  // NEW
+  options?: ApiOption[];
+  rankedProducers?: RankedProducer[];
+
+  // Backward compatibility (still returned by your API)
+  selections?: ApiSelection[];
   remainingGallons: number;
   mode: "SINGLE" | "PAIR" | "MULTI";
+
   error?: string;
 };
+
+/** ---------------- Helpers ---------------- */
 
 function fmtNum(n: number) {
   if (!Number.isFinite(n)) return "—";
   return n.toLocaleString();
 }
 
-function fmtDistanceKm(km: number) {
-  if (!Number.isFinite(km) || km === Infinity) return "—";
-  return `${km.toFixed(1)} km`;
+function fmtMiles(mi?: number) {
+  if (!Number.isFinite(mi as number)) return "—";
+  return `${(mi as number).toFixed(0)} mi`;
 }
+
+function pct(p: number) {
+  if (!Number.isFinite(p)) return "—";
+  return `${Math.round(p * 100)}%`;
+}
+
+/** ---------------- Page ---------------- */
 
 export default function ConsumerOptionsPage() {
   const router = useRouter();
@@ -42,10 +82,8 @@ export default function ConsumerOptionsPage() {
   const [data, setData] = useState<MatchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const totalAllocated = useMemo(() => {
-    if (!data?.selections?.length) return 0;
-    return data.selections.reduce((sum, s) => sum + (Number(s.allocatedGallons) || 0), 0);
-  }, [data]);
+  // Which option user is viewing (Option 1/2/3)
+  const [activeOptionIdx, setActiveOptionIdx] = useState(0);
 
   useEffect(() => {
     const demandId = localStorage.getItem("hydrosync_last_demand_id");
@@ -73,6 +111,7 @@ export default function ConsumerOptionsPage() {
         }
 
         setData(json);
+        setActiveOptionIdx(0);
       } catch (e: any) {
         setError(e?.message || "Something went wrong");
       } finally {
@@ -80,6 +119,45 @@ export default function ConsumerOptionsPage() {
       }
     })();
   }, []);
+
+  // Decide what to show as the “current plan”
+  const activePlan = useMemo(() => {
+    if (!data) return null;
+
+    const opts = data.options ?? [];
+    if (opts.length > 0) {
+      return opts[Math.min(activeOptionIdx, opts.length - 1)];
+    }
+
+    // fallback to legacy fields
+    return {
+      mode: data.mode,
+      remainingGallons: data.remainingGallons,
+      selections: data.selections ?? [],
+    } as ApiOption;
+  }, [data, activeOptionIdx]);
+
+  const totalAllocated = useMemo(() => {
+    const sels = activePlan?.selections ?? [];
+    return sels.reduce((sum, s) => sum + (Number(s.allocatedGallons) || 0), 0);
+  }, [activePlan]);
+
+  const demandIndustryDisplay = useMemo(() => {
+    if (!data?.demand) return "—";
+    return (
+      data.industryNeedDisplay ??
+      data.demand.industryNeed ??
+      data.demand.industryNeedNormalized ??
+      "—"
+    );
+  }, [data]);
+
+  const demandLocationDisplay = useMemo(() => {
+    if (!data?.demand) return "—";
+    return data.demand.location?.city
+      ? `${data.demand.location.city}, ${data.demand.location.state ?? ""}`
+      : (data.demand.location ?? "—");
+  }, [data]);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -105,7 +183,7 @@ export default function ConsumerOptionsPage() {
           <div className="mt-6 rounded-2xl border bg-white p-6 shadow-sm">
             <div className="text-sm font-semibold">Matching in progress…</div>
             <p className="mt-2 text-sm text-muted-foreground">
-              Fetching your demand and selecting the best producer(s).
+              Fetching your demand and selecting the best producer options.
             </p>
           </div>
         )}
@@ -117,7 +195,7 @@ export default function ConsumerOptionsPage() {
         )}
 
         {/* Demand Summary */}
-        {!loading && !error && data?.demand && (
+        {!loading && !error && data?.demand && activePlan && (
           <div className="mt-6 rounded-2xl border bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
@@ -128,44 +206,72 @@ export default function ConsumerOptionsPage() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Badge label={`Mode: ${data.mode}`} />
-                <Badge label={`Required: ${fmtNum(Number(data.demand.quantityNeededGallonsPerDay))} gal/day`} />
+                <Badge label={`Mode: ${activePlan.mode}`} />
+                <Badge
+                  label={`Required: ${fmtNum(Number(data.demand.quantityNeededGallonsPerDay))} gal/day`}
+                />
                 <Badge label={`Allocated: ${fmtNum(totalAllocated)} gal/day`} />
               </div>
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <KV label="Industry Need" value={data.demand.industryNeed ?? "—"} />
-              <KV
-                label="Location"
-                value={
-                  data.demand.location?.city
-                    ? `${data.demand.location.city}, ${data.demand.location.state ?? ""}`
-                    : "—"
-                }
-              />
+              <KV label="Industry Need" value={String(demandIndustryDisplay)} />
+              <KV label="Location" value={String(demandLocationDisplay)} />
             </div>
 
-            {data.remainingGallons > 0 && (
+            {activePlan.remainingGallons > 0 && (
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
                 Not enough total supply to fully satisfy demand. Remaining:{" "}
-                <strong>{fmtNum(Number(data.remainingGallons))}</strong> gal/day
+                <strong>{fmtNum(Number(activePlan.remainingGallons))}</strong> gal/day
               </div>
             )}
           </div>
         )}
 
-        {/* Matches */}
-        {!loading && !error && data && (
+        {/* Option Switcher (SINGLE / PAIR / MULTI) */}
+        {!loading && !error && data && (data.options?.length ?? 0) > 0 && (
+          <div className="mt-6 rounded-2xl border bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-semibold">Fulfillment Plans</div>
+                <div className="text-xs text-muted-foreground">
+                  Choose a plan (single supplier vs split supply).
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {(data.options ?? []).map((opt, idx) => (
+                  <button
+                    key={`${opt.mode}-${idx}`}
+                    onClick={() => setActiveOptionIdx(idx)}
+                    className={[
+                      "rounded-full border px-3 py-1 text-xs font-medium transition",
+                      idx === activeOptionIdx
+                        ? "bg-black text-white border-black"
+                        : "bg-slate-50 text-slate-700 hover:bg-slate-100",
+                    ].join(" ")}
+                  >
+                    Option {idx + 1}: {opt.mode}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Recommended Producer Supply (shows ACTIVE plan selections) */}
+        {!loading && !error && data && activePlan && (
           <div className="mt-6">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold">Recommended Producer Supply</h2>
               <div className="text-xs text-muted-foreground">
-                {data.selections?.length ? `${data.selections.length} producer(s)` : "0 producers"}
+                {activePlan.selections?.length
+                  ? `${activePlan.selections.length} producer(s)`
+                  : "0 producers"}
               </div>
             </div>
 
-            {!data.selections?.length ? (
+            {!activePlan.selections?.length ? (
               <div className="mt-4 rounded-2xl border bg-white p-6 shadow-sm">
                 <div className="text-sm font-semibold">No matches found</div>
                 <p className="mt-2 text-sm text-muted-foreground">
@@ -174,11 +280,29 @@ export default function ConsumerOptionsPage() {
               </div>
             ) : (
               <div className="mt-4 grid gap-4 md:grid-cols-2">
-                {data.selections.map((s) => (
+                {activePlan.selections.map((s) => (
                   <ProducerCard key={s.producerId} s={s} />
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Ranked alternatives */}
+        {!loading && !error && data && (data.rankedProducers?.length ?? 0) > 0 && (
+          <div className="mt-10">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold">Top Matches (ranked)</h2>
+              <div className="text-xs text-muted-foreground">
+                {data.rankedProducers?.length ?? 0} producer(s)
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              {(data.rankedProducers ?? []).slice(0, 10).map((p) => (
+                <RankedProducerCard key={p.producerId} p={p} />
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -205,41 +329,65 @@ function KV({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ProducerCard({ s }: { s: Selection }) {
+function ProducerCard({ s }: { s: ApiSelection }) {
+  const predicted = s.recommendedDisplay ?? s.recommended ?? "—";
   return (
     <div className="rounded-2xl border bg-white p-6 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="text-base font-semibold">{s.producerName}</div>
+          <div className="text-base font-semibold">{s.company_name}</div>
           <div className="mt-1 text-xs text-muted-foreground">
-            {s.predictedIndustry ? `Predicted: ${s.predictedIndustry}` : "Predicted: —"} •{" "}
-            Confidence: {Math.round((s.confidence ?? 0) * 100)}%
+            Predicted: {predicted} • Confidence: {pct(s.confidence)}
           </div>
+          <div className="mt-1 text-xs text-muted-foreground">{s.location || "—"}</div>
         </div>
 
         <div className="text-right">
           <div className="text-xs text-muted-foreground">Distance</div>
-          <div className="text-sm font-semibold">
-            {Number.isFinite(s.distanceKm) && s.distanceKm !== Infinity ? `${s.distanceKm.toFixed(1)} km` : "—"}
-          </div>
+          <div className="text-sm font-semibold">{fmtMiles(s.distanceMiles)}</div>
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3">
-        <KV label="Allocated" value={`${s.allocatedGallons.toLocaleString()} gal/day`} />
-        <KV label="Capacity" value={`${s.availableGallons.toLocaleString()} gal/day`} />
-      </div>
-
-      {s.summary && (
-        <div className="mt-4 rounded-xl border bg-slate-50 p-4">
-          <div className="text-xs font-semibold text-slate-700">Summary</div>
-          <div className="mt-1 text-sm text-slate-700">{s.summary}</div>
+      {s.gemini_summary && (
+        <div className="mt-4 rounded-xl border bg-slate-50 p-4 text-sm text-slate-700">
+          {s.gemini_summary}
         </div>
       )}
 
-      <Button className="mt-5 w-full">
-        Request this supply
-      </Button>
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <KV label="Allocated" value={`${fmtNum(Number(s.allocatedGallons))} gal/day`} />
+        <KV label="Capacity" value={`${fmtNum(Number(s.availableGallons))} gal/day`} />
+      </div>
+
+      <div className="mt-4">
+        <Button className="w-full">Request this supply</Button>
+      </div>
+    </div>
+  );
+}
+
+function RankedProducerCard({ p }: { p: RankedProducer }) {
+  const predicted = p.recommendedDisplay ?? p.recommended ?? "—";
+  return (
+    <div className="rounded-2xl border bg-white p-6 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-base font-semibold">{p.company_name}</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            Predicted: {predicted} • Confidence: {pct(p.confidence)}
+          </div>
+          <div className="mt-1 text-xs text-muted-foreground">{p.location || "—"}</div>
+        </div>
+
+        <div className="text-right">
+          <div className="text-xs text-muted-foreground">Distance</div>
+          <div className="text-sm font-semibold">{fmtMiles(p.distanceMiles)}</div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3">
+        <KV label="Capacity" value={`${fmtNum(Number(p.availableGallons))} gal/day`} />
+      </div>
     </div>
   );
 }
